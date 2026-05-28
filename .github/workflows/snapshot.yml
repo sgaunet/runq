@@ -8,10 +8,12 @@ name: snapshot
 
 on:
   push:
-    # Optionally limit to specific branches
-    # branches: [main, develop]
+    # Run on all branch pushes (required: a branch filter must be present,
+    # otherwise defining only tags-ignore prevents branch pushes from triggering)
+    branches:
+      - '**'
 
-    # Optionally skip on tag pushes (since release.yml handles those)
+    # Skip on tag pushes (since release.yml handles those)
     tags-ignore:
       - '**'
 
