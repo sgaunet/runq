@@ -38,9 +38,6 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-sboms:
-  - artifacts: archive
-
 release:
   draft: false
   prerelease: auto
