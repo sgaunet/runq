@@ -62,7 +62,7 @@ func goQuoted(s string) string {
 		case r == '\t':
 			buf = append(buf, '\\', 't')
 		case r < 0x20 || r == 0x7f:
-			buf = append(buf, '\\', 'x', hex[byte(r)>>4], hex[byte(r)&0xf])
+			buf = append(buf, '\\', 'x', hex[byte(r)>>4], hex[byte(r)&0xf]) //nolint:gosec // G115: r is < 0x80 in this branch, conversion is safe
 		default:
 			buf = append(buf, []byte(string(r))...)
 		}

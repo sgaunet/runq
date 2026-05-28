@@ -23,6 +23,10 @@ var (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -30,7 +34,7 @@ func main() {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "runq: %v\n", err)
 	}
-	os.Exit(code)
+	return code
 }
 
 // buildInfo is plumbed into the root command so version reporting stays

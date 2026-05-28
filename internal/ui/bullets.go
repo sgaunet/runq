@@ -48,16 +48,19 @@ func (b *Bullets) ensure(id, label string) *bullets.Spinner {
 	return s
 }
 
+// OnQueued creates the spinner for the command so its line is allocated up-front.
 func (b *Bullets) OnQueued(id, text string) {
 	// Create the spinner now so the coordinator allocates a line.
 	b.ensure(id, fmt.Sprintf("%s · %s", id, truncate(text, 80)))
 }
 
+// OnStart marks that the command with the given id has started running.
 func (b *Bullets) OnStart(id, text string) {
 	// Spinner already exists from OnQueued; nothing extra to do.
 	b.ensure(id, fmt.Sprintf("%s · %s", id, truncate(text, 80)))
 }
 
+// OnSuccess marks the command's spinner as succeeded with its exit code and duration.
 func (b *Bullets) OnSuccess(id, text string, exitCode int, dur time.Duration) {
 	if s := b.get(id); s != nil {
 		s.Success(fmt.Sprintf("%s · %s · exit=%d · dur=%s",
@@ -65,6 +68,7 @@ func (b *Bullets) OnSuccess(id, text string, exitCode int, dur time.Duration) {
 	}
 }
 
+// OnFailure marks the command's spinner as failed with its exit code and duration.
 func (b *Bullets) OnFailure(id, text string, exitCode int, dur time.Duration) {
 	if s := b.get(id); s != nil {
 		s.Error(fmt.Sprintf("%s · %s · exit=%d · dur=%s",
@@ -72,6 +76,7 @@ func (b *Bullets) OnFailure(id, text string, exitCode int, dur time.Duration) {
 	}
 }
 
+// OnCancelled marks the command's spinner as cancelled with its duration.
 func (b *Bullets) OnCancelled(id, text string, dur time.Duration) {
 	if s := b.get(id); s != nil {
 		s.Error(fmt.Sprintf("%s · %s · cancelled · dur=%s",
@@ -79,6 +84,7 @@ func (b *Bullets) OnCancelled(id, text string, dur time.Duration) {
 	}
 }
 
+// OnTimedOut marks the command's spinner as timed-out with its duration.
 func (b *Bullets) OnTimedOut(id, text string, dur time.Duration) {
 	if s := b.get(id); s != nil {
 		s.Error(fmt.Sprintf("%s · %s · timed-out · dur=%s",
@@ -86,12 +92,14 @@ func (b *Bullets) OnTimedOut(id, text string, dur time.Duration) {
 	}
 }
 
+// OnSpawnError marks the command's spinner as failed to spawn with the given error.
 func (b *Bullets) OnSpawnError(id, text string, err error) {
 	if s := b.get(id); s != nil {
 		s.Error(fmt.Sprintf("%s · %s · spawn-error · %v", id, truncate(text, 60), err))
 	}
 }
 
+// Close stops all spinners and releases the tracked UI resources.
 func (b *Bullets) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

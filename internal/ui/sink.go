@@ -23,11 +23,26 @@ type Sink interface {
 // Quiet is a no-op Sink for --quiet.
 type Quiet struct{}
 
-func (Quiet) OnQueued(string, string)                      {}
-func (Quiet) OnStart(string, string)                       {}
+// OnQueued is a no-op; Quiet emits no output.
+func (Quiet) OnQueued(string, string) {}
+
+// OnStart is a no-op; Quiet emits no output.
+func (Quiet) OnStart(string, string) {}
+
+// OnSuccess is a no-op; Quiet emits no output.
 func (Quiet) OnSuccess(string, string, int, time.Duration) {}
+
+// OnFailure is a no-op; Quiet emits no output.
 func (Quiet) OnFailure(string, string, int, time.Duration) {}
-func (Quiet) OnCancelled(string, string, time.Duration)    {}
-func (Quiet) OnTimedOut(string, string, time.Duration)     {}
-func (Quiet) OnSpawnError(string, string, error)           {}
-func (Quiet) Close() error                                 { return nil }
+
+// OnCancelled is a no-op; Quiet emits no output.
+func (Quiet) OnCancelled(string, string, time.Duration) {}
+
+// OnTimedOut is a no-op; Quiet emits no output.
+func (Quiet) OnTimedOut(string, string, time.Duration) {}
+
+// OnSpawnError is a no-op; Quiet emits no output.
+func (Quiet) OnSpawnError(string, string, error) {}
+
+// Close is a no-op; Quiet holds no resources.
+func (Quiet) Close() error { return nil }

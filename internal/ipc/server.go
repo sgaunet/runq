@@ -92,7 +92,7 @@ func (s *Server) Serve(ctx context.Context) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			fmt.Fprintf(s.stderrW, "runq: accept error: %v\n", err)
+			_, _ = fmt.Fprintf(s.stderrW, "runq: accept error: %v\n", err)
 			return
 		}
 		go s.handle(ctx, conn)
@@ -110,16 +110,16 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handle(ctx context.Context, c *net.UnixConn) {
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// Enforce same-user via kernel-attested peer uid.
 	uid, err := peerUID(c)
 	if err != nil {
-		fmt.Fprintf(s.stderrW, "runq: peer credential check failed: %v\n", err)
+		_, _ = fmt.Fprintf(s.stderrW, "runq: peer credential check failed: %v\n", err)
 		return
 	}
 	if uid != os.Getuid() {
-		fmt.Fprintf(s.stderrW, "runq: refused connection from uid=%d (expected %d)\n", uid, os.Getuid())
+		_, _ = fmt.Fprintf(s.stderrW, "runq: refused connection from uid=%d (expected %d)\n", uid, os.Getuid())
 		return
 	}
 
@@ -226,10 +226,10 @@ func readRequest(br *bufio.Reader) (*Request, string, error) {
 
 var errLineTooLong = errors.New("line exceeds maximum message size")
 
-// readLine reads up to max bytes including the terminating '\n'. Returns
+// readLine reads up to limit bytes including the terminating '\n'. Returns
 // the line WITHOUT the newline. Returns errLineTooLong if the limit is
 // reached before a newline.
-func readLine(br *bufio.Reader, max int) ([]byte, error) {
+func readLine(br *bufio.Reader, limit int) ([]byte, error) {
 	var buf []byte
 	for {
 		b, err := br.ReadByte()
@@ -239,7 +239,7 @@ func readLine(br *bufio.Reader, max int) ([]byte, error) {
 		if b == '\n' {
 			return buf, nil
 		}
-		if len(buf)+1 > max {
+		if len(buf)+1 > limit {
 			// Drain the rest of the line so the buffer is consistent.
 			for {
 				bb, e := br.ReadByte()

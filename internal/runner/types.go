@@ -10,6 +10,8 @@ import (
 // specs/001-parallel-cmd-runner/data-model.md.
 type State int32
 
+// State constants enumerate the lifecycle positions a Command can occupy,
+// from initial queueing through running to a terminal outcome.
 const (
 	StateQueued State = iota
 	StateRunning
@@ -54,6 +56,8 @@ func (s State) IsTerminal() bool {
 // Source describes where a Command originated.
 type Source string
 
+// Source constants enumerate the origins from which a Command may be
+// submitted to the Runner.
 const (
 	SourceCLI    Source = "cli"
 	SourceFile   Source = "file"

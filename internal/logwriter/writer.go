@@ -44,13 +44,13 @@ func Open(path string) (*Writer, string, error) {
 // tryOpen acquires the lock and opens the file in append mode.
 func tryOpen(path string) (*Writer, error) {
 	lockPath := path + ".lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // G304: log path is operator-supplied by design
 	if err != nil {
 		return nil, err
 	}
 	_ = lock.Close()
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // G304: log path is operator-supplied by design
 	if err != nil {
 		_ = os.Remove(lockPath)
 		return nil, err

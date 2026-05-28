@@ -262,7 +262,7 @@ func (r *Runner) runOne(ctx context.Context, c *Command) {
 	}
 
 	c.setState(finalState, endedAt)
-	c.exitCode.Store(int32(res.ExitCode))
+	c.exitCode.Store(int32(res.ExitCode)) // #nosec G115 -- OS exit codes fit int32
 
 	// Write log record.
 	if r.opts.Log != nil {

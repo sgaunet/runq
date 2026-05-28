@@ -73,14 +73,14 @@ func runAsRunner(ctx context.Context, cfg config.Config, cmds []runner.Spec) err
 	if err != nil {
 		return exitErr{code: exitcode.LogWriteFailed, err: fmt.Errorf("open log %s: %w", cfg.LogPath, err)}
 	}
-	defer lw.Close()
+	defer func() { _ = lw.Close() }()
 	cfg.LogPath = chosen
 	if cfg.Verbose {
 		fmt.Fprintf(os.Stderr, "runq: log file %s\n", chosen)
 	}
 
 	sink := selectSink(cfg, os.Stderr)
-	defer sink.Close()
+	defer func() { _ = sink.Close() }()
 
 	r := runner.New(runner.Options{
 		Parallelism:    cfg.Parallel,

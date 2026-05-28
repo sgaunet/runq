@@ -14,6 +14,9 @@ import (
 // Role is the role this invocation has decided to play.
 type Role int
 
+// Role values classify the outcome of runner election: whether no role has
+// been decided yet, a live runner was found (forward to it), or this process
+// should become the runner.
 const (
 	RoleUnknown   Role = iota
 	RoleForwarder      // a live runner was found

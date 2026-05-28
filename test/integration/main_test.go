@@ -42,7 +42,7 @@ func binary(t *testing.T) string {
 		cmd := exec.Command("go", "build", "-o", out, "../../cmd/runq")
 		buildOut, err := cmd.CombinedOutput()
 		if err != nil {
-			binaryErr = fmt.Errorf("go build: %v: %s", err, string(buildOut))
+			binaryErr = fmt.Errorf("go build: %w: %s", err, string(buildOut))
 			return
 		}
 		binaryPath = out

@@ -64,12 +64,12 @@ func Run(ctx context.Context, s Spec, out io.Writer) Result {
 
 	var cmd *exec.Cmd
 	if s.Shell {
-		cmd = exec.Command("/bin/sh", "-c", s.Text)
+		cmd = exec.Command("/bin/sh", "-c", s.Text) //nolint:gosec // G204: runq's purpose is to execute user-provided commands
 	} else {
 		if len(s.Argv) == 0 {
 			return Result{ExitCode: -1, Reason: "spawn-error", Err: errors.New("argv mode requires non-empty argv")}
 		}
-		cmd = exec.Command(s.Argv[0], s.Argv[1:]...)
+		cmd = exec.Command(s.Argv[0], s.Argv[1:]...) //nolint:gosec // G204: runq's purpose is to execute user-provided commands
 	}
 
 	// Child stdin = /dev/null (FR-023a).
@@ -77,7 +77,7 @@ func Run(ctx context.Context, s Spec, out io.Writer) Result {
 	if err != nil {
 		return Result{ExitCode: -1, Reason: "spawn-error", Err: fmt.Errorf("open /dev/null: %w", err)}
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 	cmd.Stdin = devNull
 	cmd.Stdout = out
 	cmd.Stderr = out

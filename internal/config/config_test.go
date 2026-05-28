@@ -39,7 +39,7 @@ func TestValidate(t *testing.T) {
 		mutate  func(c *config.Config)
 		wantErr string // substring; empty = no error expected
 	}{
-		{"baseline ok", func(c *config.Config) {}, ""},
+		{"baseline ok", func(_ *config.Config) {}, ""},
 		{"parallel too low", func(c *config.Config) { c.Parallel = 0 }, "--parallel"},
 		{"parallel too high", func(c *config.Config) { c.Parallel = 1001 }, "--parallel"},
 		{"max-queue zero", func(c *config.Config) { c.MaxQueue = 0 }, "--max-queue"},

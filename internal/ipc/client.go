@@ -42,7 +42,7 @@ func Forward(ctx context.Context, socketPath string, items []SubmitItem) (*Submi
 	if err != nil {
 		return nil, &ForwarderErr{Message: fmt.Sprintf("dial %s: %v", socketPath, err), Err: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	br := bufio.NewReaderSize(conn, MaxMessageBytes+1)
 
@@ -84,7 +84,7 @@ func Stop(ctx context.Context, socketPath string) (*StopAck, error) {
 	if err != nil {
 		return nil, &ForwarderErr{Message: fmt.Sprintf("dial %s: %v", socketPath, err), Err: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	br := bufio.NewReaderSize(conn, MaxMessageBytes+1)
 
 	if err := writeLine(conn, Request{Version: Version, Kind: KindHello}); err != nil {

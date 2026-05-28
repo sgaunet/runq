@@ -23,7 +23,7 @@ was started in the background or has no controlling terminal.
 
 Exits 0 on successful drain request, 14 if no runner is reachable.`,
 		Args: cobra.NoArgs,
-		RunE: func(c *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			if socketPath == "" {
 				socketPath = config.DefaultSocketPath()
 			}
