@@ -1,0 +1,22 @@
+# Build artifacts
+/runq
+/dist/
+*.test
+*.out
+
+# Logs produced by runq itself
+/cli-executed.log
+/cli-executed.*.log
+
+# Coverage
+coverage.out
+coverage.html
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+/.claude
+/CLAUDE.md
+/.specify
+/specs
