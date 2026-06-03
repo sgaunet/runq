@@ -3,7 +3,7 @@ package runner_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,9 +16,9 @@ import (
 func newTestRunner(t *testing.T, parallel, queueCap int) (*runner.Runner, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	lw, _, err := logwriter.Open(filepath.Join(dir, "log.log"))
+	lw, err := logwriter.OpenRun(dir, time.Unix(0, 0))
 	if err != nil {
-		t.Fatalf("Open log: %v", err)
+		t.Fatalf("OpenRun: %v", err)
 	}
 	r := runner.New(runner.Options{
 		Parallelism: parallel,
@@ -102,7 +102,7 @@ func (c *countingSink) Close() error                                  { return n
 
 func TestRunner_ParallelismCapNotExceeded(t *testing.T) {
 	dir := t.TempDir()
-	lw, _, err := logwriter.Open(filepath.Join(dir, "log.log"))
+	lw, err := logwriter.OpenRun(dir, time.Unix(0, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,4 +148,43 @@ func TestRunner_AssignsSequentialIDs(t *testing.T) {
 	}
 	r.Close()
 	r.Run(context.Background())
+}
+
+// TestRunner_LogErrors_CountedOnNewRecordFailure verifies that when the log
+// directory is removed mid-run (causing NewRecord to fail), Counts.LogErrors
+// is incremented and the command's output is not silently discarded.
+func TestRunner_LogErrors_CountedOnNewRecordFailure(t *testing.T) {
+	dir := t.TempDir()
+	lw, err := logwriter.OpenRun(dir, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("OpenRun: %v", err)
+	}
+	// Remove the run directory so NewRecord cannot create files in it.
+	if err := os.RemoveAll(lw.Dir()); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	defer func() { _ = lw.Close() }()
+
+	r := runner.New(runner.Options{
+		Parallelism: 2,
+		QueueCap:    10,
+		Shell:       true,
+		KillGrace:   time.Second,
+		Sink:        ui.Quiet{},
+		Log:         lw,
+	})
+	if _, err := r.Submit([]runner.Spec{
+		{Text: "true", Source: runner.SourceCLI},
+		{Text: "true", Source: runner.SourceCLI},
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	r.Close()
+	counts := r.Run(context.Background())
+	if counts.LogErrors == 0 {
+		t.Errorf("LogErrors = 0, want > 0 after NewRecord failure")
+	}
+	if counts.Total != 2 {
+		t.Errorf("Total = %d, want 2 (commands must still run)", counts.Total)
+	}
 }

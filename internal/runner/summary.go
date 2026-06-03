@@ -20,7 +20,7 @@ type CommandSummary struct {
 
 // RunInfo describes the runner that produced the summary.
 type RunInfo struct {
-	LogPath    string `json:"log_path,omitempty"`
+	LogDir     string `json:"log_dir,omitempty"`
 	SocketPath string `json:"socket_path,omitempty"`
 }
 

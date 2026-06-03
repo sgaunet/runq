@@ -19,9 +19,6 @@ func TestDefaults_MatchesContract(t *testing.T) {
 	if d.MaxQueue != 50 {
 		t.Errorf("MaxQueue = %d, want 50", d.MaxQueue)
 	}
-	if d.LogPath != "cli-executed.log" {
-		t.Errorf("LogPath = %q, want %q", d.LogPath, "cli-executed.log")
-	}
 	if d.OutputFormat != config.OutputText {
 		t.Errorf("OutputFormat = %q, want %q", d.OutputFormat, config.OutputText)
 	}
@@ -54,6 +51,12 @@ func TestValidate(t *testing.T) {
 		{"stdin+args conflict", func(c *config.Config) {
 			c.FromStdin = true
 		}, "mutually exclusive"},
+		{"relative log-dir rejected", func(c *config.Config) {
+			c.LogDir = "relative/path"
+		}, "--log-dir"},
+		{"absolute log-dir ok", func(c *config.Config) {
+			c.LogDir = "/tmp/runq/logs"
+		}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

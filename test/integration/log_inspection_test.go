@@ -9,17 +9,67 @@ import (
 	"testing"
 )
 
-// TestLogInspection_AfterMixedRun exercises US3: after a run including
-// stdout, stderr, success, failure, and timed-out commands, the log file
-// has one well-formed frame per command and the footer fields are
-// correct.
-func TestLogInspection_AfterMixedRun(t *testing.T) {
+// runSubdir returns the single per-run subdirectory created under base.
+func runSubdir(t *testing.T, base string) string {
+	t.Helper()
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		t.Fatalf("read base log dir %s: %v", base, err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	if len(dirs) != 1 {
+		t.Fatalf("want exactly one run subdir under %s, found %v", base, dirs)
+	}
+	return filepath.Join(base, dirs[0])
+}
+
+// readFileWithSlug returns the content of the single file in dir whose name
+// contains the given slug fragment.
+func readFileWithSlug(t *testing.T, dir, slug string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read run dir %s: %v", dir, err)
+	}
+	var match string
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "_"+slug+"_") {
+			if match != "" {
+				t.Fatalf("multiple files match slug %q: %s and %s", slug, match, e.Name())
+			}
+			match = e.Name()
+		}
+	}
+	if match == "" {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Fatalf("no file matches slug %q; files: %v", slug, names)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, match))
+	if err != nil {
+		t.Fatalf("read %s: %v", match, err)
+	}
+	return string(data)
+}
+
+// TestLogInspection_PerCommandFiles exercises US1: after a run including
+// stdout, stderr, a failure, and a timed-out command, there is exactly one
+// well-formed per-command file, each name encodes its command, and each file
+// holds that command's output framed by begin/end markers.
+func TestLogInspection_PerCommandFiles(t *testing.T) {
 	bin := binary(t)
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "cli-executed.log")
+	base := t.TempDir()
 
 	cmd := exec.Command(bin,
-		"--log", logPath,
+		"--log-dir", base,
+		"--socket", shortSocketPath(t),
 		"--timeout", "200ms",
 		"--kill-grace", "100ms",
 		"echo to-stdout",
@@ -27,55 +77,57 @@ func TestLogInspection_AfterMixedRun(t *testing.T) {
 		"false",
 		"sleep 2", // expected to time out
 	)
-	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	_ = cmd.Run()
 
-	data, err := os.ReadFile(logPath)
+	dir := runSubdir(t, base)
+
+	// One file per submitted command.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read log: %v", err)
+		t.Fatalf("read run dir: %v", err)
 	}
-	s := string(data)
-
-	// One begin, one end per submitted command.
-	if got := strings.Count(s, "=== begin "); got != 4 {
-		t.Errorf("begin count = %d, want 4", got)
-	}
-	if got := strings.Count(s, "=== end   "); got != 4 {
-		t.Errorf("end count = %d, want 4", got)
-	}
-
-	// The to-stdout command's body must contain its line.
-	if !strings.Contains(s, "to-stdout\n=== end") {
-		t.Errorf("missing stdout body for echo to-stdout in:\n%s", s)
-	}
-
-	// The stderr command's body must contain its line.
-	if !strings.Contains(s, "to-stderr\n=== end") {
-		t.Errorf("missing stderr body for echo to-stderr in:\n%s", s)
-	}
-
-	// `false` should record exit=1.
-	if !strings.Contains(s, `"false"`) {
-		t.Errorf("missing false frame header: %s", s)
-	}
-
-	// `sleep 2` should record exit=timed-out (with --timeout 200ms).
-	if !strings.Contains(s, "exit=timed-out") {
-		t.Errorf("missing timed-out footer entry in:\n%s", s)
-	}
-
-	// Every footer must have exit= and dur= present.
-	for _, line := range strings.Split(s, "\n") {
-		if !strings.HasPrefix(line, "=== end   ") {
-			continue
+	if len(entries) != 4 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
 		}
-		if !strings.Contains(line, "exit=") {
-			t.Errorf("footer missing exit=: %q", line)
+		t.Errorf("file count = %d, want 4; files: %v", len(entries), names)
+	}
+
+	// Each file is named <ts>_<slug>_<id>.log and contains exactly one record.
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".log") {
+			t.Errorf("file %q missing .log suffix", e.Name())
 		}
-		if !strings.Contains(line, "dur=") {
-			t.Errorf("footer missing dur=: %q", line)
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
 		}
+		s := string(data)
+		if strings.Count(s, "=== begin ") != 1 || strings.Count(s, "=== end   ") != 1 {
+			t.Errorf("file %q is not exactly one record:\n%s", e.Name(), s)
+		}
+		if !strings.Contains(s, "dur=") {
+			t.Errorf("file %q footer missing dur= field:\n%s", e.Name(), s)
+		}
+	}
+
+	// stdout command: recognizable name + body.
+	if s := readFileWithSlug(t, dir, "echo-to-stdout"); !strings.Contains(s, "to-stdout\n=== end") {
+		t.Errorf("echo-to-stdout file missing body:\n%s", s)
+	}
+	// stderr command: body captured too.
+	if s := readFileWithSlug(t, dir, "echo-to-stderr-2"); !strings.Contains(s, "to-stderr\n=== end") {
+		t.Errorf("echo-to-stderr file missing body:\n%s", s)
+	}
+	// false: exit=1.
+	if s := readFileWithSlug(t, dir, "false"); !strings.Contains(s, "exit=1 ") {
+		t.Errorf("false file missing exit=1:\n%s", s)
+	}
+	// sleep 2: timed out under --timeout 200ms.
+	if s := readFileWithSlug(t, dir, "sleep-2"); !strings.Contains(s, "exit=timed-out") {
+		t.Errorf("sleep-2 file missing timed-out footer:\n%s", s)
 	}
 }

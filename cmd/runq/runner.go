@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -68,15 +69,26 @@ func forward(ctx context.Context, cfg config.Config, cmds []runner.Spec) error {
 }
 
 func runAsRunner(ctx context.Context, cfg config.Config, cmds []runner.Spec) error {
-	// Open the log file (auto-uniquify on collision).
-	lw, chosen, err := logwriter.Open(cfg.LogPath)
-	if err != nil {
-		return exitErr{code: exitcode.LogWriteFailed, err: fmt.Errorf("open log %s: %w", cfg.LogPath, err)}
+	// Guard against an unresolvable log directory (e.g. XDG_STATE_HOME and
+	// HOME both unset). config.DefaultLogDir returns "" in that case; treat
+	// it as a hard failure per FR-015.
+	if cfg.LogDir == "" {
+		return exitErr{
+			code: exitcode.LogWriteFailed,
+			err:  fmt.Errorf("log directory could not be resolved; set --log-dir or RUNQ_LOG_DIR"),
+		}
 	}
-	defer func() { _ = lw.Close() }()
-	cfg.LogPath = chosen
+
+	// Create the per-run log directory under the XDG state dir (or override).
+	run, err := logwriter.OpenRun(cfg.LogDir, time.Now())
+	if err != nil {
+		return exitErr{code: exitcode.LogWriteFailed, err: err}
+	}
+	defer func() { _ = run.Close() }()
+	// Report (and surface in the JSON summary) the concrete run directory.
+	cfg.LogDir = run.Dir()
 	if cfg.Verbose {
-		fmt.Fprintf(os.Stderr, "runq: log file %s\n", chosen)
+		fmt.Fprintf(os.Stderr, "runq: log dir %s\n", cfg.LogDir)
 	}
 
 	sink := selectSink(cfg, os.Stderr)
@@ -89,7 +101,7 @@ func runAsRunner(ctx context.Context, cfg config.Config, cmds []runner.Spec) err
 		DefaultTimeout: cfg.Timeout,
 		KillGrace:      cfg.KillGrace,
 		Sink:           sink,
-		Log:            lw,
+		Log:            run,
 	})
 
 	if _, err := r.Submit(cmds); err != nil {
@@ -127,6 +139,11 @@ func runAsRunner(ctx context.Context, cfg config.Config, cmds []runner.Spec) err
 
 	if ctx.Err() != nil {
 		return exitErr{code: exitcode.Cancelled, err: ctx.Err()}
+	}
+	// Log failures take precedence: a run that cannot write its log files is
+	// not trustworthy even if commands appeared to succeed.
+	if counts.LogErrors > 0 {
+		return exitErr{code: exitcode.LogWriteFailed}
 	}
 	if counts.Failed > 0 || counts.TimedOut > 0 || counts.SpawnErrors > 0 {
 		return exitErr{code: exitcode.Failed}

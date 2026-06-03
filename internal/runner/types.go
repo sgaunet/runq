@@ -140,6 +140,7 @@ type Counts struct {
 	Cancelled   int `json:"cancelled"`
 	TimedOut    int `json:"timed_out"`
 	SpawnErrors int `json:"spawn_errors"`
+	LogErrors   int `json:"log_errors"`
 }
 
 // idGen produces stable per-runner identifiers of the form c-NNNN.

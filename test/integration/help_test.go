@@ -27,7 +27,7 @@ func TestHelp_ContainsContractStrings(t *testing.T) {
 	// Every advertised flag must appear in the help text.
 	flags := []string{
 		"--parallel", "--no-shell", "--timeout", "--kill-grace",
-		"--max-queue", "--log", "--socket", "--from-file",
+		"--max-queue", "--log-dir", "--socket", "--from-file",
 		"--from-stdin", "--output", "--quiet", "--verbose", "--no-color",
 	}
 	for _, f := range flags {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,13 +16,12 @@ func TestForward_HappyPath(t *testing.T) {
 	bin := binary(t)
 	dir := t.TempDir()
 	socket := shortSocketPath(t)
-	logPath := filepath.Join(dir, "cli-executed.log")
 
 	// Start the runner in the background. Its initial batch sleeps 3s so
 	// the forwarder has ample time to forward.
 	runner := exec.Command(bin,
 		"--socket", socket,
-		"--log", logPath,
+		"--log-dir", dir,
 		"sleep 3 && echo first",
 	)
 	runner.Dir = dir
@@ -43,10 +41,9 @@ func TestForward_HappyPath(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// Run the forwarder.
+	// Run the forwarder. (A forwarder does not open a log dir of its own.)
 	fwd := exec.Command(bin,
 		"--socket", socket,
-		"--log", logPath,
 		"echo forwarded",
 	)
 	fwd.Dir = dir
@@ -80,19 +77,20 @@ func TestForward_HappyPath(t *testing.T) {
 		t.Errorf("runner exit = %d, want 0; stderr=%q", runner.ProcessState.ExitCode(), runnerErr.String())
 	}
 
-	// The runner's log file should contain BOTH commands.
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	// The runner's per-run directory should contain a file for BOTH the
+	// initial command and the forwarded command (FR: forwarded submissions
+	// are logged under the same per-command scheme).
+	runDir := runSubdir(t, dir)
+	initial := readFileWithSlug(t, runDir, "sleep-3-echo-first")
+	if !strings.Contains(initial, `"sleep 3 && echo first"`) {
+		t.Errorf("initial command file missing its frame:\n%s", initial)
 	}
-	if !strings.Contains(string(data), `"sleep 3 && echo first"`) {
-		t.Errorf("log missing initial command frame: %q", string(data))
+	forwarded := readFileWithSlug(t, runDir, "echo-forwarded")
+	if !strings.Contains(forwarded, `"echo forwarded"`) {
+		t.Errorf("forwarded command file missing its frame:\n%s", forwarded)
 	}
-	if !strings.Contains(string(data), `"echo forwarded"`) {
-		t.Errorf("log missing forwarded command frame: %q", string(data))
-	}
-	if !strings.Contains(string(data), "src=socket") {
-		t.Errorf("log missing src=socket label: %q", string(data))
+	if !strings.Contains(forwarded, "src=socket") {
+		t.Errorf("forwarded command file missing src=socket label:\n%s", forwarded)
 	}
 }
 
@@ -103,9 +101,8 @@ func TestForward_NoRunner_BehavesAsRunner(t *testing.T) {
 	bin := binary(t)
 	dir := t.TempDir()
 	socket := shortSocketPath(t)
-	logPath := filepath.Join(dir, "cli-executed.log")
 
-	cmd := exec.Command(bin, "--socket", socket, "--log", logPath, "echo hi")
+	cmd := exec.Command(bin, "--socket", socket, "--log-dir", dir, "echo hi")
 	cmd.Dir = dir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -123,11 +120,10 @@ func TestStop_Drains(t *testing.T) {
 	bin := binary(t)
 	dir := t.TempDir()
 	socket := shortSocketPath(t)
-	logPath := filepath.Join(dir, "cli-executed.log")
 
 	runner := exec.Command(bin,
 		"--socket", socket,
-		"--log", logPath,
+		"--log-dir", dir,
 		"sleep 2 && echo done",
 	)
 	runner.Dir = dir

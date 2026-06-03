@@ -16,7 +16,7 @@ func writeSummary(out io.Writer, cfg config.Config, c runner.Counts, r *runner.R
 	switch cfg.OutputFormat {
 	case config.OutputJSON:
 		summary := runner.BuildJSONSummary(r, runner.RunInfo{
-			LogPath:    cfg.LogPath,
+			LogDir:     cfg.LogDir,
 			SocketPath: cfg.SocketPath,
 		})
 		return runner.EncodeJSONSummary(out, summary)
