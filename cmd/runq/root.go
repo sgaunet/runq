@@ -43,7 +43,7 @@ Exit codes:
   1   at least one command failed
   2   usage error
   10  cancelled (SIGINT/SIGTERM)
-  11  log file could not be written
+  11  log directory or a per-command log file could not be written
   12  socket conflict that could not be resolved
   13  forwarder: queue full
   14  forwarder: failed to reach the running instance
@@ -81,6 +81,7 @@ func (e exitErr) Unwrap() error { return e.err }
 func newRootCmd(ctx context.Context, bi buildInfo) *cobra.Command {
 	cfg := config.Defaults()
 	cfg.SocketPath = config.DefaultSocketPath()
+	cfg.LogDir = config.DefaultLogDir()
 
 	root := &cobra.Command{
 		Use:           "runq [flags] [command...]",
@@ -114,7 +115,7 @@ func newRootCmd(ctx context.Context, bi buildInfo) *cobra.Command {
 	flags.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "per-command timeout (0 = unlimited)")
 	flags.DurationVar(&cfg.KillGrace, "kill-grace", cfg.KillGrace, "grace between SIGTERM and SIGKILL on cancel/timeout")
 	flags.IntVar(&cfg.MaxQueue, "max-queue", cfg.MaxQueue, "max pending commands (forwarder submissions over this limit are refused)")
-	flags.StringVar(&cfg.LogPath, "log", cfg.LogPath, "log file path (runner only; auto-uniquified on collision)")
+	flags.StringVar(&cfg.LogDir, "log-dir", cfg.LogDir, "directory for per-command logs (runner only; default $XDG_STATE_HOME/runq/logs)")
 	flags.StringVar(&cfg.SocketPath, "socket", cfg.SocketPath, "unix socket path")
 	flags.StringVar(&cfg.FromFile, "from-file", "", "read commands from PATH, one per line (# and blank lines skipped)")
 	flags.BoolVar(&cfg.FromStdin, "from-stdin", false, "read commands from stdin, one per line")
@@ -136,7 +137,7 @@ var envBindings = map[string]string{
 	"timeout":    "RUNQ_TIMEOUT",
 	"kill-grace": "RUNQ_KILL_GRACE",
 	"max-queue":  "RUNQ_MAX_QUEUE",
-	"log":        "RUNQ_LOG",
+	"log-dir":    "RUNQ_LOG_DIR",
 	"socket":     "RUNQ_SOCKET",
 	"output":     "RUNQ_OUTPUT",
 	"quiet":      "RUNQ_QUIET",

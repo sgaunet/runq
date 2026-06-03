@@ -1,12 +1,14 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sgaunet/runq/internal/exec"
@@ -26,7 +28,7 @@ type Options struct {
 	KillGrace      time.Duration
 
 	Sink ui.Sink
-	Log  *logwriter.Writer
+	Log  *logwriter.Run
 }
 
 // Runner orchestrates command execution. Construct one via New, populate
@@ -41,9 +43,10 @@ type Runner struct {
 	finished []*Command
 	closed   bool
 
-	wake   chan struct{}
-	once   sync.Once
-	closeC chan struct{}
+	wake      chan struct{}
+	once      sync.Once
+	closeC    chan struct{}
+	logErrors atomic.Int64 // counts per-command log open/finish failures
 }
 
 // New constructs a Runner with the given options.
@@ -215,7 +218,6 @@ func (r *Runner) runOne(ctx context.Context, c *Command) {
 		r.opts.Sink.OnStart(c.ID, c.Text)
 	}
 
-	var buf bytes.Buffer
 	spec := exec.Spec{
 		Text:      c.Text,
 		Shell:     r.opts.Shell,
@@ -231,14 +233,51 @@ func (r *Runner) runOne(ctx context.Context, c *Command) {
 		// mode (the default). See contracts/cli.md.
 		spec.Argv = strings.Fields(c.Text)
 	}
-	res := exec.Run(ctx, spec, &buf)
 
-	endedAt := time.Now()
-	dur := endedAt.Sub(startedAt)
+	// Open this command's own log file and stream its output straight to
+	// disk (FR-012: no in-memory buffering). One file per command means no
+	// cross-command interleaving and no shared write lock.
+	//
+	// On NewRecord failure: do not discard output silently (FR-015). Fall back
+	// to stderr so the command's output is visible. Increment logErrors so the
+	// run exits non-zero with exitcode.LogWriteFailed.
+	var rec *logwriter.Record
+	out := io.Discard
+	if r.opts.Log != nil {
+		var err error
+		rec, err = r.opts.Log.NewRecord(c.ID, c.Text, string(c.Source), startedAt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "runq: cannot open log for %q: %v\n", c.Text, err)
+			r.logErrors.Add(1)
+			out = os.Stderr // surface output rather than silently discard (FR-015)
+		} else {
+			out = rec
+		}
+	}
+
+	// Finalize the log record exactly once, even on panic. Named locals are
+	// assigned after exec.Run so the deferred closure captures their final values.
+	var (
+		endedAt   time.Time
+		exitField string
+		dur       time.Duration
+	)
+	defer func() {
+		if rec != nil {
+			if err := rec.Finish(endedAt, exitField, dur); err != nil {
+				fmt.Fprintf(os.Stderr, "runq: %v\n", err)
+				r.logErrors.Add(1)
+			}
+		}
+	}()
+
+	res := exec.Run(ctx, spec, out)
+
+	endedAt = time.Now()
+	dur = endedAt.Sub(startedAt)
 
 	// Map exec.Result → State + exit code field.
 	var finalState State
-	exitField := ""
 	switch res.Reason {
 	case "ok":
 		finalState = StateSucceeded
@@ -263,13 +302,6 @@ func (r *Runner) runOne(ctx context.Context, c *Command) {
 
 	c.setState(finalState, endedAt)
 	c.exitCode.Store(int32(res.ExitCode)) // #nosec G115 -- OS exit codes fit int32
-
-	// Write log record.
-	if r.opts.Log != nil {
-		header := logwriter.BuildHeader(c.ID, c.Text, string(c.Source), startedAt)
-		footer := logwriter.BuildFooter(c.ID, endedAt, exitField, dur)
-		_ = r.opts.Log.WriteRecord(header, footer, &buf)
-	}
 
 	// Fire UI hook.
 	if r.opts.Sink != nil {
@@ -314,6 +346,7 @@ func (r *Runner) counts() Counts {
 			counts.SpawnErrors++
 		}
 	}
+	counts.LogErrors = int(r.logErrors.Load())
 	return counts
 }
 

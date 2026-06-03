@@ -15,6 +15,8 @@ func TestBatch_MixedOutcomes(t *testing.T) {
 	dir := t.TempDir()
 
 	cmd := exec.Command(bin,
+		"--log-dir", dir,
+		"--socket", shortSocketPath(t),
 		"echo ok1",
 		"echo ok2",
 		"false",
@@ -53,14 +55,24 @@ func TestBatch_MixedOutcomes(t *testing.T) {
 		t.Errorf("stderr missing id c-0001: %q", stderr.String())
 	}
 
-	// Log file should exist and contain 5 frames.
-	logPath := filepath.Join(dir, "cli-executed.log")
-	data, err := os.ReadFile(logPath)
+	// One per-command file should exist, each holding exactly one frame.
+	runDir := runSubdir(t, dir)
+	entries, err := os.ReadDir(runDir)
 	if err != nil {
-		t.Fatalf("ReadFile log: %v", err)
+		t.Fatalf("read run dir: %v", err)
 	}
-	begins := strings.Count(string(data), "=== begin ")
-	ends := strings.Count(string(data), "=== end   ")
+	if len(entries) != 5 {
+		t.Errorf("per-command file count = %d, want 5", len(entries))
+	}
+	var begins, ends int
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(runDir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		begins += strings.Count(string(data), "=== begin ")
+		ends += strings.Count(string(data), "=== end   ")
+	}
 	if begins != 5 || ends != 5 {
 		t.Errorf("frame counts begin=%d end=%d, want 5/5", begins, ends)
 	}
@@ -70,7 +82,9 @@ func TestBatch_JSONSummary(t *testing.T) {
 	bin := binary(t)
 	dir := t.TempDir()
 
-	cmd := exec.Command(bin, "--output=json", "echo a", "echo b", "false")
+	cmd := exec.Command(bin, "--output=json",
+		"--log-dir", dir, "--socket", shortSocketPath(t),
+		"echo a", "echo b", "false")
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -114,7 +128,8 @@ func TestBatch_FromFile(t *testing.T) {
 	if err := os.WriteFile(listing, []byte("# comment\necho one\n\necho two\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(bin, "--from-file", listing)
+	logDir := filepath.Join(dir, "logs")
+	cmd := exec.Command(bin, "--from-file", listing, "--log-dir", logDir, "--socket", shortSocketPath(t))
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -125,8 +140,20 @@ func TestBatch_FromFile(t *testing.T) {
 	if !strings.Contains(stdout.String(), "2 ok") {
 		t.Errorf("summary missing 2 ok: %q", stdout.String())
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "cli-executed.log"))
-	if !strings.Contains(string(data), "src=file") {
-		t.Errorf("log missing src=file: %q", string(data))
+	// Per-command files must record their source as the file.
+	runDir := runSubdir(t, logDir)
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fileSrcCount int
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(runDir, e.Name()))
+		if strings.Contains(string(data), "src=file") {
+			fileSrcCount++
+		}
+	}
+	if fileSrcCount != 2 {
+		t.Errorf("files with src=file = %d, want 2 (one per from-file command) in %s", fileSrcCount, runDir)
 	}
 }

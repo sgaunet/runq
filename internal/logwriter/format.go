@@ -1,72 +1,61 @@
+// Package logwriter writes one framed log file per executed command into a
+// per-run directory (see Run/Record in run.go). Each file contains a single
+// contiguous record — a begin header, the command's stdout+stderr streamed
+// verbatim, and an end footer. Because every command owns its own file, no
+// cross-command byte interleaving is possible.
 package logwriter
 
-// Frame grammar for the log file. Each record is a single contiguous
-// block in the file. Concurrent commands never interleave at the byte
-// level: see writer.go's WriteRecord, which holds an exclusive mutex
-// while writing the header, body, and footer of one record.
-//
-//   record  ::= header LF body footer
-//   header  ::= "=== begin " ID " · " ISO8601 " · " QUOTED-TEXT " · src=" SOURCE " ===" LF
-//   footer  ::= "=== end   " ID " · " ISO8601 " · exit=" EXIT " · dur=" DURATION " ===" LF
-//
-// ID         a stable per-runner identifier, e.g. "c-0042"
-// ISO8601    RFC3339 with nanoseconds in UTC, e.g. "2026-05-27T14:32:00.123456789Z"
-// QUOTED-TEXT the command text rendered with Go's %q verb (always single-line)
-// SOURCE     one of: cli | file | stdin | socket
-// EXIT       printable form of the outcome:
-//              "0"           — successful exit
-//              "<int>"       — non-zero exit code
-//              "signal-N"    — killed by signal N
-//              "cancelled"   — context cancelled before completion
-//              "timed-out"   — per-command deadline exceeded
-//              "spawn-error" — child could not be started (e.g. argv empty)
-// DURATION   Go time.Duration string between started and ended
-//
-// The body is the child's stdout and stderr, interleaved in arrival
-// order, written verbatim with no re-encoding.
-//
-// To extract one command's output from the log file:
-//
-//   awk '/^=== begin c-0042 /,/^=== end   c-0042 /' cli-executed.log
-//
-// To list all failures:
-//
-//   grep '^=== end' cli-executed.log | grep -v 'exit=0 '
+import (
+	"fmt"
+	"time"
+)
 
-// EscapeText returns the command text in a single-line, double-quoted
-// form by deferring to Go's %q formatter. This is the same function used
-// internally by BuildHeader; it is exported so that callers needing to
-// reproduce or parse the frame format have a single source of truth.
-func EscapeText(s string) string {
-	// Re-use Go's %q verb so escaping stays consistent across header
-	// production and any downstream consumer.
-	return goQuoted(s)
+// Frame grammar for each per-command file. One record per file:
+//
+//	record  ::= header LF body footer
+//	header  ::= "=== begin " ID " · " ISO8601 " · " QUOTED-TEXT " · src=" SOURCE " ===" LF
+//	footer  ::= "=== end   " ID " · " ISO8601 " · exit=" EXIT " · dur=" DURATION " ===" LF
+//
+// ID          a stable per-runner identifier, e.g. "c-0042"
+// ISO8601     RFC3339 with nanoseconds in UTC, e.g. "2026-05-28T14:32:00.123456789Z"
+//             (the file NAME carries a local-time timestamp; the header is UTC by design)
+// QUOTED-TEXT the command text rendered with Go's %q verb (always single-line)
+// SOURCE      one of: cli | file | stdin | socket
+// EXIT        printable form of the outcome:
+//               "0"           — successful exit
+//               "<int>"       — non-zero exit code
+//               "signal-N"    — killed by signal N
+//               "cancelled"   — context cancelled before completion
+//               "timed-out"   — per-command deadline exceeded
+//               "spawn-error" — child could not be started (e.g. argv empty)
+// DURATION    Go time.Duration string between started and ended
+//
+// The body is the child's stdout and stderr, interleaved in arrival order,
+// written verbatim with no re-encoding. To read one command's output, just
+// cat its file — the whole file is that command's record.
+
+// BuildHeader produces the "=== begin ..." line including a trailing newline.
+// The command text is rendered with %q, which yields a single-line Go-quoted
+// string that handles backslashes, quotes, and non-printable characters in one
+// pass.
+func BuildHeader(id, text string, source string, start time.Time) []byte {
+	return fmt.Appendf(nil, "=== begin %s · %s · %q · src=%s ===\n",
+		id, start.UTC().Format(time.RFC3339Nano), text, source)
 }
 
-func goQuoted(s string) string {
-	// Go's fmt %q is the canonical implementation. Localized helper to
-	// avoid pulling fmt into hot paths (BuildHeader already uses fmt).
-	const hex = "0123456789abcdef"
-	buf := make([]byte, 0, len(s)+2)
-	buf = append(buf, '"')
-	for _, r := range s {
-		switch {
-		case r == '"':
-			buf = append(buf, '\\', '"')
-		case r == '\\':
-			buf = append(buf, '\\', '\\')
-		case r == '\n':
-			buf = append(buf, '\\', 'n')
-		case r == '\r':
-			buf = append(buf, '\\', 'r')
-		case r == '\t':
-			buf = append(buf, '\\', 't')
-		case r < 0x20 || r == 0x7f:
-			buf = append(buf, '\\', 'x', hex[byte(r)>>4], hex[byte(r)&0xf]) //nolint:gosec // G115: r is < 0x80 in this branch, conversion is safe
-		default:
-			buf = append(buf, []byte(string(r))...)
-		}
-	}
-	buf = append(buf, '"')
-	return string(buf)
+// BuildFooter produces the "=== end ..." line including a trailing newline.
+// exitField is the printable representation (e.g. "0", "1", "signal-15",
+// "cancelled", "timed-out", "spawn-error").
+func BuildFooter(id string, end time.Time, exitField string, dur time.Duration) []byte {
+	return fmt.Appendf(nil, "=== end   %s · %s · exit=%s · dur=%s ===\n",
+		id, end.UTC().Format(time.RFC3339Nano), exitField, dur)
+}
+
+// EscapeText returns the command text in a single-line, double-quoted form
+// using Go's %q formatter. This handles backslashes, double-quotes,
+// non-printable characters, and invalid UTF-8 bytes identically to BuildHeader.
+// Exported so downstream consumers that parse the frame format share one source
+// of truth.
+func EscapeText(s string) string {
+	return fmt.Sprintf("%q", s)
 }

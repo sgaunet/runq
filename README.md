@@ -15,11 +15,28 @@ go install github.com/sgaunet/runq/cmd/runq@latest
 
 See [specs/001-parallel-cmd-runner/quickstart.md](specs/001-parallel-cmd-runner/quickstart.md).
 
-## Log file format
+## Logs
 
-`runq` appends one framed record per command to its log file (default
-`cli-executed.log` in the current working directory; override with `--log`
-or `RUNQ_LOG`).
+`runq` writes **one log file per command** into a per-run directory under the
+XDG state directory:
+
+```text
+$XDG_STATE_HOME/runq/logs/<run-ts>_run-<rand>/<cmd-ts>_<slug>_<id>.log
+# default base: ~/.local/state/runq/logs
+```
+
+The base directory is created on demand and is overridable with `--log-dir` or
+`RUNQ_LOG_DIR`. Each file name encodes when the command ran, what it was, and a
+unique id:
+
+- `<cmd-ts>` / `<run-ts>` — local-time `YYYYMMDD-HHMMSS` (files sort
+  chronologically).
+- `<slug>` — the full command text, lowercased and reduced to a
+  filesystem-safe form (`sleep 50` → `sleep-50`, truncated if very long).
+- `<id>` — a short random hex token, so identical commands run in parallel or
+  repeated across runs never collide.
+
+Each file holds a single framed record:
 
 ```text
 === begin <id> · <iso8601-start> · "<command-text>" · src=<source> ===
@@ -27,34 +44,38 @@ or `RUNQ_LOG`).
 === end   <id> · <iso8601-end>   · exit=<outcome> · dur=<duration> ===
 ```
 
-- `<id>` — stable per-run identifier (`c-0001`, `c-0002`, …).
-- `<iso8601>` — RFC3339 with nanoseconds, in UTC.
-- `<command-text>` — the command as executed, rendered with Go's `%q` so
-  it's single-line, double-quoted, and escape-safe.
-- `<source>` — `cli`, `file`, `stdin`, or `socket` (the latter for
-  commands forwarded by a second `runq` invocation).
-- `<outcome>` — `0` on success, the numeric exit code on failure, or one
-  of `signal-N`, `cancelled`, `timed-out`, `spawn-error`.
+- `<id>` (in the header) — the stable per-run identifier (`c-0001`, …).
+- `<iso8601>` — RFC3339 with nanoseconds, in **UTC** (the file *name* uses
+  local time; the header is UTC by design).
+- `<command-text>` — the command as executed, rendered with Go's `%q`.
+- `<source>` — `cli`, `file`, `stdin`, or `socket` (the latter for commands
+  forwarded by a second `runq` invocation).
+- `<outcome>` — `0` on success, the numeric exit code on failure, or one of
+  `signal-N`, `cancelled`, `timed-out`, `spawn-error`.
 - `<duration>` — Go `time.Duration` between started and ended.
 
-Concurrent commands never interleave at the byte level — each record is
-written under a single exclusive lock, so the body between matching
-begin/end markers is exactly what the command produced.
-
-To extract one command's output:
+Because each command owns its file, output streams straight to disk and no
+cross-command byte interleaving is possible. Reading one command's output is
+just `cat`:
 
 ```bash
-awk '/^=== begin c-0042 /,/^=== end   c-0042 /' cli-executed.log
+cat ~/.local/state/runq/logs/<run>/<cmd-ts>_<slug>_<id>.log
 ```
 
-To list all failures:
+List a run's failures:
 
 ```bash
-grep '^=== end' cli-executed.log | grep -v 'exit=0 '
+grep -L 'exit=0 ' ~/.local/state/runq/logs/<run>/*.log
 ```
 
-There is **no built-in size cap**. For long-running operators, rotate the
-file externally with `logrotate` or your platform's equivalent.
+There is **no built-in size cap** and runq never deletes or rotates old logs.
+Manage disk usage by pruning old run directories yourself (e.g. via `find` or
+`logrotate`).
+
+> **Changed in v0.x (breaking):** earlier versions wrote a single combined
+> `cli-executed.log` in the working directory via `--log`/`RUNQ_LOG`. That file
+> and those flags are gone; use the per-command files under `--log-dir` /
+> `RUNQ_LOG_DIR` instead.
 
 ## Principles
 

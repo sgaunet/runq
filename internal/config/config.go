@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
@@ -30,7 +31,7 @@ type Config struct {
 	Timeout      time.Duration
 	KillGrace    time.Duration
 	MaxQueue     int
-	LogPath      string
+	LogDir       string
 	SocketPath   string
 	FromFile     string
 	FromStdin    bool
@@ -42,14 +43,14 @@ type Config struct {
 }
 
 // Defaults returns a Config populated with the defaults from
-// contracts/cli.md. SocketPath is left empty; callers should fill it via
-// DefaultSocketPath() so the resolution can be overridden by tests.
+// contracts/cli.md. SocketPath and LogDir are left empty; callers fill them
+// via DefaultSocketPath() and DefaultLogDir() so the resolution can be
+// overridden by tests and so flags/env take precedence.
 func Defaults() Config {
 	return Config{
 		Parallel:     10,
 		KillGrace:    5 * time.Second,
 		MaxQueue:     50,
-		LogPath:      "cli-executed.log",
 		OutputFormat: OutputText,
 	}
 }
@@ -79,6 +80,9 @@ func (c Config) Validate() error {
 	}
 	if c.FromStdin && len(c.Args) > 0 {
 		return errors.New("positional command arguments and --from-stdin are mutually exclusive")
+	}
+	if c.LogDir != "" && !filepath.IsAbs(c.LogDir) {
+		return fmt.Errorf("--log-dir must be an absolute path, got %q", c.LogDir)
 	}
 	return nil
 }

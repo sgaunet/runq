@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 
 func TestJSONSummary_ShapeMatchesContract(t *testing.T) {
 	dir := t.TempDir()
-	lw, _, err := logwriter.Open(filepath.Join(dir, "log.log"))
+	lw, err := logwriter.OpenRun(dir, time.Unix(0, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +32,7 @@ func TestJSONSummary_ShapeMatchesContract(t *testing.T) {
 	r.Close()
 	r.Run(context.Background())
 
-	info := runner.RunInfo{LogPath: "log.log", SocketPath: "/tmp/x.sock"}
+	info := runner.RunInfo{LogDir: "log-dir", SocketPath: "/tmp/x.sock"}
 	summary := runner.BuildJSONSummary(r, info)
 
 	if summary.Version != 1 {
@@ -41,6 +40,9 @@ func TestJSONSummary_ShapeMatchesContract(t *testing.T) {
 	}
 	if summary.Counts.Total != 2 || summary.Counts.Succeeded != 1 || summary.Counts.Failed != 1 {
 		t.Errorf("counts = %+v", summary.Counts)
+	}
+	if summary.Counts.LogErrors != 0 {
+		t.Errorf("LogErrors = %d, want 0", summary.Counts.LogErrors)
 	}
 	if len(summary.Commands) != 2 {
 		t.Fatalf("commands len = %d, want 2", len(summary.Commands))
@@ -72,8 +74,8 @@ func TestJSONSummary_ShapeMatchesContract(t *testing.T) {
 		}
 	}
 	run, _ := roundTrip["run"].(map[string]any)
-	if run["log_path"] != "log.log" {
-		t.Errorf("run.log_path = %v, want %q", run["log_path"], "log.log")
+	if run["log_dir"] != "log-dir" {
+		t.Errorf("run.log_dir = %v, want %q", run["log_dir"], "log-dir")
 	}
 	if run["socket_path"] != "/tmp/x.sock" {
 		t.Errorf("run.socket_path = %v, want %q", run["socket_path"], "/tmp/x.sock")
