@@ -53,7 +53,14 @@ type Result struct {
 //
 // Run never panics. It honors ctx cancellation by killing the entire
 // process group (Setpgid) — SIGTERM, then SIGKILL after s.KillGrace.
-func Run(ctx context.Context, s Spec, out io.Writer) Result {
+//
+// forceCtx is a second, independent cancellation used for forced shutdown
+// (e.g. a serve listener's 2nd Ctrl+C): when it is cancelled the process
+// group is SIGKILLed immediately, bypassing any remaining s.KillGrace
+// window. Pass context.Background() when no forced path is needed (the
+// implicit runner does), which leaves the SIGTERM→grace→SIGKILL behavior
+// unchanged.
+func Run(ctx, forceCtx context.Context, s Spec, out io.Writer) Result {
 	// Per-command timeout layered on top of the parent context.
 	cmdCtx := ctx
 	var cancelTimeout context.CancelFunc
@@ -110,9 +117,16 @@ func Run(ctx context.Context, s Spec, out io.Writer) Result {
 			select {
 			case <-done:
 				return
+			case <-forceCtx.Done():
+				// Forced shutdown: skip the rest of the grace window.
+				killProcessGroup(pgid, syscall.SIGKILL)
 			case <-time.After(grace):
 				killProcessGroup(pgid, syscall.SIGKILL)
 			}
+		case <-forceCtx.Done():
+			// Forced shutdown before any SIGTERM: kill immediately.
+			killTriggered.Store(true)
+			killProcessGroup(pgid, syscall.SIGKILL)
 		case <-done:
 			return
 		}

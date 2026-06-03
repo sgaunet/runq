@@ -27,6 +27,20 @@ type Options struct {
 	DefaultTimeout time.Duration
 	KillGrace      time.Duration
 
+	// Linger keeps Run blocked while the queue is empty instead of exiting
+	// on drain. A lingering Run returns only when the context is cancelled
+	// or Close is called (and the queue has drained). Used by `serve`; the
+	// implicit runner leaves it false so it exits the moment its queue
+	// drains (FR-021).
+	Linger bool
+
+	// ForceCtx, when cancelled, makes in-flight commands SIGKILL their
+	// process group immediately, bypassing the remaining KillGrace window.
+	// `serve` cancels it on a 2nd Ctrl+C. nil is treated as a
+	// never-cancelled context, preserving the default SIGTERM→grace→SIGKILL
+	// behavior.
+	ForceCtx context.Context
+
 	Sink ui.Sink
 	Log  *logwriter.Run
 }
@@ -156,14 +170,18 @@ func (r *Runner) Run(ctx context.Context) Counts {
 			}(c)
 		}
 
-		// Termination conditions (FR-021):
-		// - Per spec, the runner exits when both pending and running are
-		//   empty. A forwarder arriving exactly at that moment loses
-		//   the race and sees no listener (code 14 on its side).
-		// - On context cancellation, we wait for in-flight to finish
-		//   then exit.
+		// Termination conditions:
+		// - Default (FR-021): the runner exits when both pending and
+		//   running are empty. A forwarder arriving exactly at that moment
+		//   loses the race and sees no listener (code 14 on its side).
+		// - Linger (serve, FR-004): a drained queue does NOT end the run;
+		//   the runner keeps waiting for forwarded submissions until the
+		//   context is cancelled (graceful shutdown) or Close is called.
+		// - On context cancellation, we wait for in-flight to finish then
+		//   exit.
 		r.mu.Lock()
-		done := (len(r.pending) == 0 && len(r.running) == 0) ||
+		drained := len(r.pending) == 0 && len(r.running) == 0
+		done := (drained && (!r.opts.Linger || r.closed)) ||
 			(ctx.Err() != nil && len(r.running) == 0)
 		r.mu.Unlock()
 		if done {
@@ -196,12 +214,18 @@ func (r *Runner) takeNext() *Command {
 }
 
 // cancelCommand records a queued command as cancelled (used when the
-// context fires before the command had a chance to start).
+// context fires before the command had a chance to start). takeNext has
+// already moved c into the running set, so it must be removed there as it
+// moves to finished — otherwise len(running) never returns to zero and Run
+// cannot reach its termination condition (this matters whenever pending
+// commands are cancelled at shutdown, e.g. a serve listener draining on
+// Ctrl+C, FR-015).
 func (r *Runner) cancelCommand(c *Command) {
 	now := time.Now()
 	c.setState(StateCancelled, now)
 	c.exitCode.Store(-1)
 	r.mu.Lock()
+	delete(r.running, c.ID)
 	r.finished = append(r.finished, c)
 	r.mu.Unlock()
 	if r.opts.Sink != nil {
@@ -271,7 +295,11 @@ func (r *Runner) runOne(ctx context.Context, c *Command) {
 		}
 	}()
 
-	res := exec.Run(ctx, spec, out)
+	forceCtx := r.opts.ForceCtx
+	if forceCtx == nil {
+		forceCtx = context.Background()
+	}
+	res := exec.Run(ctx, forceCtx, spec, out)
 
 	endedAt = time.Now()
 	dur = endedAt.Sub(startedAt)
@@ -348,6 +376,15 @@ func (r *Runner) counts() Counts {
 	}
 	counts.LogErrors = int(r.logErrors.Load())
 	return counts
+}
+
+// InFlight reports the number of commands that are pending or running. A
+// serve listener samples it at the moment of the first shutdown trigger to
+// decide its exit code (work in flight → cancelled; idle → ok) per FR-018.
+func (r *Runner) InFlight() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.pending) + len(r.running)
 }
 
 // Finished returns a snapshot of completed commands. Safe to call after

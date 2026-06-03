@@ -110,7 +110,7 @@ func runAsRunner(ctx context.Context, cfg config.Config, cmds []runner.Spec) err
 
 	// Bind the submission socket using an adapter so the runner package
 	// doesn't depend on ipc.Handler's exact method shape.
-	srv, err := ipc.Listen(cfg.SocketPath, ipcAdapter{r: r}, os.Stderr)
+	srv, err := ipc.Listen(cfg.SocketPath, ipcAdapter{r: r, onStop: r.Close}, os.Stderr)
 	if err != nil {
 		// If we couldn't bind even after Resolve said the path was free,
 		// this is a real socket conflict.

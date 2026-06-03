@@ -99,6 +99,18 @@ func (s *Server) Serve(ctx context.Context) {
 	}
 }
 
+// BeginShutdown marks the server as shutting down so subsequent hello
+// requests are answered with CodeShuttingDown, WITHOUT closing the listener
+// or removing the socket file (those happen in Close). A serve listener
+// calls this at the start of a graceful drain so new forwarders receive the
+// structured "shutting down" refusal instead of a bare connection error.
+// Idempotent.
+func (s *Server) BeginShutdown() {
+	s.mu.Lock()
+	s.shutdown = true
+	s.mu.Unlock()
+}
+
 // Close shuts the listener and removes the socket file.
 func (s *Server) Close() error {
 	s.mu.Lock()
