@@ -15,6 +15,37 @@ go install github.com/sgaunet/runq/cmd/runq@latest
 
 See [specs/001-parallel-cmd-runner/quickstart.md](specs/001-parallel-cmd-runner/quickstart.md).
 
+## Serve (persistent listener)
+
+By default a `runq` run exits as soon as its queue drains. For a long-lived
+target you can feed over time, use `runq serve`: it binds the per-user socket,
+**stays alive while idle**, and runs whatever later `runq` invocations forward
+into it.
+
+```bash
+# terminal A — start the listener (stays up until you stop it)
+runq serve
+
+# terminal B — forward commands into it, any time, from any shell
+runq 'make build' 'make test'
+runq './deploy.sh staging'
+```
+
+Stopping (graceful shutdown):
+
+- **Ctrl+C / SIGTERM** — stop accepting new submissions, send `SIGTERM` to
+  in-flight commands, wait up to `--kill-grace` (default 5s), then `SIGKILL`
+  any stragglers and exit.
+- **second Ctrl+C** — force: `SIGKILL` remaining children immediately.
+- **`runq stop`** — same graceful shutdown, for a `serve` running under a
+  supervisor with no controlling terminal.
+
+`serve` takes no commands of its own — forward them with plain `runq`. All of a
+session's per-command logs land under a single run directory (see
+[Logs](#logs)). Exit codes: `0` when stopped while idle, `10` when stopped with
+work in flight or queued, `12` if another instance already owns the socket.
+See `runq serve --help` for the full contract.
+
 ## Logs
 
 `runq` writes **one log file per command** into a per-run directory under the

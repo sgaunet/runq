@@ -76,6 +76,87 @@ func TestRunner_QueueCapEnforced(t *testing.T) {
 	r.Run(context.Background())
 }
 
+// TestRunner_LingerStaysAliveUntilCancel verifies FR-004: with Linger set,
+// Run does NOT return when the queue drains; it keeps waiting until the
+// context is cancelled.
+func TestRunner_LingerStaysAliveUntilCancel(t *testing.T) {
+	dir := t.TempDir()
+	lw, err := logwriter.OpenRun(dir, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("OpenRun: %v", err)
+	}
+	defer func() { _ = lw.Close() }()
+	r := runner.New(runner.Options{
+		Parallelism: 2, QueueCap: 50, Shell: true, KillGrace: time.Second,
+		Linger: true, Sink: ui.Quiet{}, Log: lw,
+	})
+	if _, err := r.Submit([]runner.Spec{{Text: "true", Source: runner.SourceCLI}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	doneC := make(chan runner.Counts, 1)
+	go func() { doneC <- r.Run(ctx) }()
+
+	// The single command drains quickly; a lingering Run must keep waiting.
+	select {
+	case <-doneC:
+		t.Fatal("lingering Run returned on drain; want it to keep waiting")
+	case <-time.After(300 * time.Millisecond):
+	}
+	if n := r.InFlight(); n != 0 {
+		t.Errorf("InFlight = %d, want 0 after drain", n)
+	}
+
+	cancel()
+	select {
+	case counts := <-doneC:
+		if counts.Total != 1 || counts.Succeeded != 1 {
+			t.Errorf("counts = %+v, want 1 total/1 succeeded", counts)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("lingering Run did not return after ctx cancel")
+	}
+}
+
+// TestRunner_NonLingerExitsOnDrainWithoutClose is the regression guard: the
+// implicit runner (Linger=false) exits the moment its queue drains, even
+// without Close (FR-021).
+func TestRunner_NonLingerExitsOnDrainWithoutClose(t *testing.T) {
+	r, cleanup := newTestRunner(t, 2, 50)
+	defer cleanup()
+	if _, err := r.Submit([]runner.Spec{{Text: "true", Source: runner.SourceCLI}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	doneC := make(chan runner.Counts, 1)
+	go func() { doneC <- r.Run(context.Background()) }()
+	select {
+	case counts := <-doneC:
+		if counts.Succeeded != 1 {
+			t.Errorf("counts = %+v, want 1 succeeded", counts)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-linger Run did not exit on drain without Close")
+	}
+}
+
+// TestRunner_InFlight checks the pending+running accounting used by serve to
+// choose its exit code.
+func TestRunner_InFlight(t *testing.T) {
+	r, cleanup := newTestRunner(t, 1, 50)
+	defer cleanup()
+	if n := r.InFlight(); n != 0 {
+		t.Errorf("InFlight = %d, want 0 initially", n)
+	}
+	if _, err := r.Submit([]runner.Spec{
+		{Text: "true"}, {Text: "true"}, {Text: "true"},
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if n := r.InFlight(); n != 3 {
+		t.Errorf("InFlight = %d, want 3 after submit (all pending)", n)
+	}
+}
+
 // countingSink counts the maximum number of concurrently running commands
 // observed. It satisfies the ui.Sink interface.
 type countingSink struct {

@@ -25,6 +25,9 @@ Two roles, picked automatically:
   Forwarder — a live socket owned by you was found. Sends commands to the
               running instance and exits.
 
+For a long-lived listener that stays up while idle and ends on Ctrl+C, use the
+'runq serve' subcommand (see 'runq serve --help').
+
 Streams:
 
   stdout = data only (a summary; --output=text|json)
@@ -117,8 +120,11 @@ func newRootCmd(ctx context.Context, bi buildInfo) *cobra.Command {
 	flags.IntVar(&cfg.MaxQueue, "max-queue", cfg.MaxQueue, "max pending commands (forwarder submissions over this limit are refused)")
 	flags.StringVar(&cfg.LogDir, "log-dir", cfg.LogDir, "directory for per-command logs (runner only; default $XDG_STATE_HOME/runq/logs)")
 	flags.StringVar(&cfg.SocketPath, "socket", cfg.SocketPath, "unix socket path")
-	flags.StringVar(&cfg.FromFile, "from-file", "", "read commands from PATH, one per line (# and blank lines skipped)")
-	flags.BoolVar(&cfg.FromStdin, "from-stdin", false, "read commands from stdin, one per line")
+	// Command-source flags are root-local (not persistent): subcommands such
+	// as `serve` and `stop` take no command sources, so they must not inherit
+	// these (FR-002).
+	root.Flags().StringVar(&cfg.FromFile, "from-file", "", "read commands from PATH, one per line (# and blank lines skipped)")
+	root.Flags().BoolVar(&cfg.FromStdin, "from-stdin", false, "read commands from stdin, one per line")
 	flags.StringVar(&cfg.OutputFormat, "output", cfg.OutputFormat, "summary format: text or json")
 	flags.BoolVar(&cfg.Quiet, "quiet", cfg.Quiet, "suppress live UI and per-command status (errors and summary still emit)")
 	flags.BoolVar(&cfg.Verbose, "verbose", cfg.Verbose, "extra diagnostics on stderr")
@@ -126,6 +132,7 @@ func newRootCmd(ctx context.Context, bi buildInfo) *cobra.Command {
 
 	root.AddCommand(newVersionCmd(bi))
 	root.AddCommand(newStopCmd(ctx))
+	root.AddCommand(newServeCmd(ctx, &cfg))
 	return root
 }
 
