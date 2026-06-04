@@ -11,15 +11,19 @@ import (
 
 func TestPlain_EmitsOnStderrWriter(t *testing.T) {
 	var buf bytes.Buffer
-	p := ui.NewPlain(&buf)
+	p := ui.NewPlain(&buf, ui.Resolve(0, true))
 	p.OnQueued("c-0001", "echo hi")
 	p.OnStart("c-0001", "echo hi")
 	p.OnSuccess("c-0001", "echo hi", 0, 12*time.Millisecond)
 	got := buf.String()
-	for _, want := range []string{"QUEUED", "STARTED", "OK", "c-0001", "exit=0"} {
+	for _, want := range []string{"QUEUED", "STARTED", "OK", "c-0001", "exit=0", "dur="} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q in %q", want, got)
 		}
+	}
+	// New aligned format drops the legacy "·" separators.
+	if strings.Contains(got, "·") {
+		t.Errorf("output should not contain legacy '·' separator: %q", got)
 	}
 }
 
