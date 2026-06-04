@@ -186,13 +186,21 @@ func buildInitialCommands(cfg config.Config) ([]runner.Spec, error) {
 	return cmds, nil
 }
 
-// selectSink picks the appropriate UI Sink based on TTY status and flags.
+// selectSink picks the appropriate UI Sink based on TTY status and flags, and
+// resolves the aligned-output Layout. Non-TTY output uses a fixed fallback width
+// (deterministic when piped); a TTY uses a command zone sized to the detected
+// terminal width.
 func selectSink(cfg config.Config, stderrW *os.File) ui.Sink {
 	if cfg.Quiet {
 		return ui.Quiet{}
 	}
-	if !term.IsTerminal(int(stderrW.Fd())) {
-		return ui.NewPlain(stderrW)
+	fd := int(stderrW.Fd())
+	if !term.IsTerminal(fd) {
+		return ui.NewPlain(stderrW, ui.Resolve(0, true))
 	}
-	return ui.NewBullets(stderrW)
+	width, _, err := term.GetSize(fd)
+	if err != nil {
+		width = 0
+	}
+	return ui.NewBullets(stderrW, ui.Resolve(width, false))
 }
