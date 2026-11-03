@@ -1,7 +1,7 @@
 [tools]
-go = "1.26.7"
+go = "1.27.3"
 "github:go-task/task" = "latest"
-"github:golangci/golangci-lint" = "2.12.2"
+"github:golangci/golangci-lint" = "2.15.0"
 "aqua:docker/buildx" = "latest"
 docker-cli = "latest"
 docker-slim = "latest"
